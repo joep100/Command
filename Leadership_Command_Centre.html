@@ -90,6 +90,7 @@
     <button data-t="retention">Retention watch</button>
     <button data-t="cost">Cost &amp; pricing</button>
     <button data-t="compare">2025 vs 2026</button>
+    <button data-t="periods">Compare periods</button>
     <button data-t="projection">Projection</button>
     <button data-t="patterns">Patterns</button>
     <button data-t="actions">Actions</button>
@@ -140,6 +141,35 @@
     <div class="card"><h3>Ground vs Air revenue</h3><p class="note">Delivery revenue by segment, both years.</p><canvas id="cmpSegChart"></canvas></div>
   </div>
   <div id="cmpGroups"></div>
+  </section>
+
+  <section class="tab" id="tab-periods">
+  <style>.psel{background:var(--panel);border:1px solid var(--line);color:var(--txt);padding:8px 12px;border-radius:8px;font-size:13px}</style>
+  <div class="card hl" style="margin-bottom:16px">
+    <h3>Compare periods</h3>
+    <p class="note">Pick any two date ranges to compare the headline metrics. Card &amp; PAYG revenue are included (matching the headline); Ground/Air are delivery-booking segments. If the two ranges span a different number of months, switch the basis to <em>monthly average</em> for a fair comparison.</p>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;margin-top:12px">
+      <div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Period A</div>
+        <div style="display:flex;gap:6px;align-items:center"><select id="pAfrom" class="psel"></select><span style="color:var(--muted)">to</span><select id="pAto" class="psel"></select></div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Period B</div>
+        <div style="display:flex;gap:6px;align-items:center"><select id="pBfrom" class="psel"></select><span style="color:var(--muted)">to</span><select id="pBto" class="psel"></select></div>
+      </div>
+      <div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Basis</div>
+        <select id="pBasis" class="psel"><option value="total">Period total</option><option value="avg">Monthly average</option></select>
+      </div>
+    </div>
+    <div class="kpis" id="perKpis" style="grid-template-columns:repeat(4,1fr);margin-top:16px"></div>
+  </div>
+  <div class="grid">
+    <div class="card"><h3>Revenue &amp; gross profit</h3><p class="note" id="perChartNote"></p><canvas id="perChart"></canvas></div>
+    <div class="card"><h3>All metrics</h3><p class="note">Period A vs Period B with the change.</p>
+      <table><thead><tr><th style="text-align:left">Metric</th><th id="perThA"></th><th id="perThB"></th><th>Change</th></tr></thead><tbody id="perBody"></tbody></table>
+    </div>
+  </div>
   </section>
 
   <section class="tab" id="tab-projection">
@@ -839,9 +869,9 @@ document.getElementById('longtail').innerHTML = ltHtml;
 document.getElementById('ltTag').textContent = lt.accts80+' make 80%';
 
 (function(){
-  var CHART_IDS=['momChart','pnlChart','mixChart','gpSegChart','bookChart','moveChart','rpbChart','surChart','payChart','tenChart','costChart','mixShiftChart','compChart','cmpRevChart','cmpSegChart','projChart','budChart'];
+  var CHART_IDS=['momChart','pnlChart','mixChart','gpSegChart','bookChart','moveChart','rpbChart','surChart','payChart','tenChart','costChart','mixShiftChart','compChart','cmpRevChart','cmpSegChart','perChart','projChart','budChart'];
   var btns=[].slice.call(document.querySelectorAll('.tabs button'));
-  var map={overview:'tab-overview',actions:'tab-actions',patterns:'tab-patterns',revenue:'tab-revenue',payments:'tab-payments',budget:'tab-budget',customers:'tab-customers',cost:'tab-cost',retention:'tab-retention',compare:'tab-compare',projection:'tab-projection'};
+  var map={overview:'tab-overview',actions:'tab-actions',patterns:'tab-patterns',revenue:'tab-revenue',payments:'tab-payments',budget:'tab-budget',customers:'tab-customers',cost:'tab-cost',retention:'tab-retention',compare:'tab-compare',periods:'tab-periods',projection:'tab-projection'};
   function show(t){
     btns.forEach(function(b){b.classList.toggle('active',b.dataset.t===t);});
     Object.keys(map).forEach(function(k){document.getElementById(map[k]).classList.toggle('active',k===t);});
@@ -972,6 +1002,49 @@ document.getElementById('ltTag').textContent = lt.accts80+' make 80%';
     {label:'Air',data:[rA.prev,rA.cur],backgroundColor:A}
   ]},options:gopt({plugins:{legend:{labels:{boxWidth:12,usePointStyle:true}},tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+eur(c.parsed.y);}}}},
     scales:{x:{grid:{display:false}},y:{ticks:{callback:function(v){return eurk(v);}}}}})});
+})();
+
+(function(){
+  var basis='total';
+  var selA0=document.getElementById('pAfrom'),selA1=document.getElementById('pAto'),
+      selB0=document.getElementById('pBfrom'),selB1=document.getElementById('pBto'),
+      selBs=document.getElementById('pBasis');
+  MONTHS.forEach(function(m,i){[selA0,selA1,selB0,selB1].forEach(function(sl){var o=document.createElement('option');o.value=i;o.textContent=m;sl.appendChild(o);});});
+  var n=MONTHS.length;
+  selA0.value=Math.max(0,n-6);selA1.value=Math.max(0,n-4);selB0.value=Math.max(0,n-3);selB1.value=n-1;
+  function agg(i0,i1){var r={rev:0,gp:0,bk:0,g:0,a:0,brev:0,act:0,n:0};for(var i=i0;i<=i1;i++){var m=M[i];r.rev+=m.totalRev;r.gp+=m.totalGp;r.bk+=m.total;r.g+=m.groundRev;r.a+=m.airRev;r.brev+=m.revenue;r.act+=m.active;r.n++;}return r;}
+  function val(r,k){if(k==='margin')return r.rev?r.gp/r.rev*100:0;if(k==='rpb')return r.bk?r.brev/r.bk:0;if(k==='active')return r.n?r.act/r.n:0;var raw={rev:r.rev,gp:r.gp,bookings:r.bk,groundRev:r.g,airRev:r.a}[k];return (basis==='avg'&&r.n)?raw/r.n:raw;}
+  function lbl(i0,i1){return MONTHS[i0]===MONTHS[i1]?MONTHS[i0]:MONTHS[i0]+'\u2013'+MONTHS[i1];}
+  var rows=[{k:'rev',label:'Total revenue (incl. card)',fmt:'eur'},{k:'gp',label:'Gross profit',fmt:'eur'},{k:'margin',label:'Gross margin',fmt:'pct'},{k:'bookings',label:'Bookings',fmt:'num'},{k:'groundRev',label:'Ground revenue',fmt:'eur'},{k:'airRev',label:'Air revenue',fmt:'eur'},{k:'active',label:'Active customers (avg/mo)',fmt:'num'},{k:'rpb',label:'Revenue per booking',fmt:'eur'}];
+  function fv(v,f){return f==='eur'?eur(v):(f==='pct'?v.toFixed(1)+'%':fmt(Math.round(v)));}
+  var chart=null;
+  function render(){
+    var a0=+selA0.value,a1=+selA1.value,b0=+selB0.value,b1=+selB1.value;
+    if(a1<a0){a1=a0;selA1.value=a1;} if(b1<b0){b1=b0;selB1.value=b1;}
+    basis=selBs.value;
+    var A=agg(a0,a1),B=agg(b0,b1),la=lbl(a0,a1),lb=lbl(b0,b1);
+    document.getElementById('perThA').textContent=la+(basis==='avg'?' (avg/mo)':'')+' \u00b7 '+A.n+'mo';
+    document.getElementById('perThB').textContent=lb+(basis==='avg'?' (avg/mo)':'')+' \u00b7 '+B.n+'mo';
+    var kdef=[['rev','Total revenue','eur'],['gp','Gross profit','eur'],['margin','Gross margin','pct'],['bookings','Bookings','num']];
+    var kh='';
+    kdef.forEach(function(d){var pa=val(A,d[0]),pb=val(B,d[0]),delta,dc;
+      if(d[0]==='margin'){var dd=pb-pa;delta=(dd>=0?'+':'')+dd.toFixed(1)+'pp';dc=dd>0?'up':(dd<0?'down':'flat');}
+      else{var pp=pa?(pb/pa-1)*100:0;delta=(pp>=0?'\u25b2 +':'\u25bc ')+Math.abs(pp).toFixed(1)+'%';dc=pp>0?'up':(pp<0?'down':'flat');}
+      kh+='<div class="kpi"><div class="lbl">'+d[1]+'</div><div class="val">'+fv(pb,d[2])+'</div><div class="delta '+dc+'">'+delta+'</div></div>';});
+    document.getElementById('perKpis').innerHTML=kh;
+    var bh='';
+    rows.forEach(function(r){var pa=val(A,r.k),pb=val(B,r.k),chg,cc;
+      if(r.k==='margin'){var dd=pb-pa;chg=(dd>=0?'+':'')+dd.toFixed(1)+' pp';cc=dd>0?'up':(dd<0?'down':'flat');}
+      else{var pp=pa?(pb/pa-1)*100:0;chg=(pp>=0?'+':'')+pp.toFixed(1)+'%';cc=pp>0?'up':(pp<0?'down':'flat');}
+      bh+='<tr><td style="text-align:left">'+r.label+'</td><td>'+fv(pa,r.fmt)+'</td><td>'+fv(pb,r.fmt)+'</td><td class="'+cc+'">'+chg+'</td></tr>';});
+    document.getElementById('perBody').innerHTML=bh;
+    document.getElementById('perChartNote').textContent=(basis==='avg'?'Monthly average, ':'Period totals, ')+la+' vs '+lb+'.';
+    var rv=[val(A,'rev'),val(B,'rev')],gpv=[val(A,'gp'),val(B,'gp')];
+    if(chart)chart.destroy();
+    chart=new Chart(perChart,{type:'bar',data:{labels:[la,lb],datasets:[{label:'Revenue',data:rv,backgroundColor:G},{label:'Gross profit',data:gpv,backgroundColor:GP}]},options:gopt({plugins:{legend:{labels:{boxWidth:12,usePointStyle:true}},tooltip:{callbacks:{label:function(c){return c.dataset.label+': '+eur(c.parsed.y);}}}},scales:{x:{grid:{display:false}},y:{ticks:{callback:function(v){return eurk(v);}}}}})});
+  }
+  [selA0,selA1,selB0,selB1,selBs].forEach(function(sl){sl.addEventListener('change',render);});
+  render();
 })();
 
 (function(){
